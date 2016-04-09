@@ -11,7 +11,9 @@ import ru.pixonic.domain.Event;
 import java.util.Comparator;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 
+import static java.util.Comparator.comparing;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.joda.time.DateTime.now;
 import static org.joda.time.DateTimeZone.UTC;
@@ -28,6 +30,7 @@ public class ConsumerServiceImpl implements ConsumerService {
     private final BlockingQueue<Runnable> queue;
     private final int maxQueueSize;
     private final Histogram drifts;
+    private final AtomicLong idCounter = new AtomicLong();
 
     public ConsumerServiceImpl(int maxQueueSize, int maxThreads, int lateMaxThreads) {
         // FIXME: find optimal queue length for late task executor
@@ -55,10 +58,10 @@ public class ConsumerServiceImpl implements ConsumerService {
 
         if (event.getCreated().isBeforeNow()) {
             // task in the past, run it immediately
-            lateTaskExecutor.submit(new CallableWrapper<>(event));
+            lateTaskExecutor.submit(new CallableWrapper<>(idCounter.incrementAndGet(), event));
         } else {
             scheduledExecutor.schedule(
-                    new CallableWrapper<>(event),
+                    new CallableWrapper<>(idCounter.incrementAndGet(), event),
                     event.getCreated().minus(now(UTC).getMillis()).getMillis(),
                     MILLISECONDS
             );
@@ -93,8 +96,10 @@ public class ConsumerServiceImpl implements ConsumerService {
 
     private class CallableWrapper<R> implements Callable<R> {
         private final Event<R> delegate;
+        private final long id;
 
-        public CallableWrapper(Event<R> delegate) {
+        public CallableWrapper(long id, Event<R> delegate) {
+            this.id = id;
             this.delegate = delegate;
         }
 
@@ -108,10 +113,25 @@ public class ConsumerServiceImpl implements ConsumerService {
         public Event<R> getDelegate() {
             return delegate;
         }
+
+        public DateTime getCreated() {
+            return delegate.getCreated();
+        }
+
+        public Long getId() {
+            return id;
+        }
     }
 
     private static class CustomThreadPoolExecutor extends ThreadPoolExecutor {
-        public CustomThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, ThreadFactory threadFactory) {
+        public CustomThreadPoolExecutor(
+                int corePoolSize,
+                int maximumPoolSize,
+                long keepAliveTime,
+                TimeUnit unit,
+                BlockingQueue<Runnable> workQueue,
+                ThreadFactory threadFactory
+        ) {
             super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory);
         }
 
@@ -121,7 +141,7 @@ public class ConsumerServiceImpl implements ConsumerService {
                 throw new IllegalArgumentException("Strange callable given!");
             }
 
-            return new PriorityFutureTask<T>((CallableWrapper)callable);
+            return new PriorityFutureTask<T>((CallableWrapper) callable);
         }
     }
 
@@ -143,13 +163,18 @@ public class ConsumerServiceImpl implements ConsumerService {
         }
     }
 
-    private class EventComparator implements Comparator<Runnable> {
+    private static class EventComparator implements Comparator<Runnable> {
         @Override
         public int compare(Runnable o1, Runnable o2) {
-            PriorityFutureTask<?> task1 = ((PriorityFutureTask<?>) o1);
-            PriorityFutureTask<?> task2 = ((PriorityFutureTask<?>) o2);
+            CallableWrapper<?> wrapper1 = ((PriorityFutureTask<?>) o1).getWrapper();
+            CallableWrapper<?> wrapper2 = ((PriorityFutureTask<?>) o2).getWrapper();
 
-            return task1.getWrapper().getDelegate().getCreated().compareTo(task2.getWrapper().getDelegate().getCreated());
+            return Comparator.comparing(dateTimeFunc)
+                    .thenComparing(CallableWrapper::getId)
+                    .compare(wrapper1, wrapper2);
         }
     }
+
+    // helps compiler
+    private static Function<CallableWrapper<?>, DateTime> dateTimeFunc = CallableWrapper::getCreated;
 }
