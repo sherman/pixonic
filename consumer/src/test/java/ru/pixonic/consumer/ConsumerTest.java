@@ -75,18 +75,20 @@ public class ConsumerTest {
 
         ConcurrentMap<Long, Integer> result = new ConcurrentHashMap<>();
         Supplier<Integer> nextIdFunc = new MonotonicIncSupplier(1);
-        Supplier<Integer> nextDelayFunc = new MonotonicDecSupplier(-5000, 2);
+        Supplier<Integer> nextDelayFunc = new MonotonicDecSupplier(-5000, 1);
 
         // executor is overloaded
         for (int i = 0; i < 4; i++) {
             service.addEvent(pastStub);
         }
 
+        DateTime now = now(UTC);
+
         int max = 10;
         CountDownLatch latch = new CountDownLatch(max);
 
         for (int i = 0; i < max; i++) {
-            service.addEvent(getEvent(latch, result, nextIdFunc, nextDelayFunc));
+            service.addEvent(getEvent(now, latch, result, nextIdFunc, nextDelayFunc));
         }
 
         latch.await();
@@ -193,6 +195,7 @@ public class ConsumerTest {
     ) {
         Integer id = nextIdFunc.get();
         DateTime time = start.plus(nextDelayFunc.get());
+
         return new Event<>(
                 time,
                 () -> {
