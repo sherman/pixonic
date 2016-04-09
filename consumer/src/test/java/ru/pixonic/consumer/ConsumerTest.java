@@ -73,7 +73,7 @@ public class ConsumerTest {
     public void orderInPast() throws InterruptedException {
         ConsumerService service = new ConsumerServiceImpl(1024, 10, 1);
 
-        List<Integer> result = new ArrayList<>();
+        ConcurrentMap<Long, Integer> result = new ConcurrentHashMap<>();
         Supplier<Integer> nextIdFunc = new MonotonicIncSupplier(1);
         Supplier<Integer> nextDelayFunc = new MonotonicDecSupplier(-5000, 2);
 
@@ -90,8 +90,15 @@ public class ConsumerTest {
         }
 
         latch.await();
-        log.info("{}", result);
-        assertEquals(result, asList(10, 9, 8, 7, 6, 5, 4, 3, 2, 1));
+
+        List<Integer> sortedResult = result.keySet().stream()
+                .sorted()
+                .map(result::get)
+                .collect(Collectors.toList());
+
+        log.info("{}", sortedResult);
+
+        assertEquals(sortedResult, asList(10, 9, 8, 7, 6, 5, 4, 3, 2, 1));
     }
 
     @Test
@@ -117,6 +124,7 @@ public class ConsumerTest {
         }
 
         latch.await();
+
         List<Integer> sortedResult = result.keySet().stream()
                 .sorted()
                 .map(result::get)
@@ -189,7 +197,7 @@ public class ConsumerTest {
                 time,
                 () -> {
                     try {
-                        //log.info("{} {}", id, time);
+                        log.info("{} {}", id, time);
                         synchronized (result) {
                             result.add(id);
                         }
@@ -213,12 +221,26 @@ public class ConsumerTest {
                 time,
                 () -> {
                     try {
+                        log.info("{} {}", id, time);
                         result.put(System.nanoTime(), id);
-                        return 42;
+                        int sum = 0;
+                        for (int i = 0; i < 1000000; i++) {
+                            sum = i * i - i;
+                        }
+                        return sum;
                     } finally {
                         condition.countDown();
                     }
                 });
+    }
+
+    private Event<Integer> getEvent(
+            CountDownLatch condition,
+            ConcurrentMap<Long, Integer> result,
+            Supplier<Integer> nextIdFunc,
+            Supplier<Integer> nextDelayFunc
+    ) {
+        return getEvent(now(UTC), condition, result, nextIdFunc, nextDelayFunc);
     }
 
     private static class MonotonicIncSupplier implements Supplier<Integer> {
