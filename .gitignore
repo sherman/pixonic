@@ -1,0 +1,19 @@
+# Idea Files #
+.idea/
+.idea/*
+*.ipr
+*.iml
+*.iws
+*.ids
+workspace.xml
+tasks.xml
+
+# Compiled Files #
+*.class
+*/build/*
+build/*
+*/out/*
+out/*
+*/target/*
+
+
