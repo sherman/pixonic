@@ -19,7 +19,7 @@ import java.util.function.Supplier;
 import static java.util.Arrays.asList;
 import static org.joda.time.DateTime.now;
 import static org.joda.time.DateTimeZone.UTC;
-import static org.testng.AssertJUnit.assertEquals;
+import static org.testng.Assert.assertEquals;
 
 /**
  * @author Denis Gabaydulin
@@ -32,7 +32,7 @@ public class ConsumerTest {
 
     @Test
     public void simpleOrder() throws InterruptedException {
-        ConsumerService service = new ConsumerServiceImpl(1024, 16);
+        ConsumerService service = new ConsumerServiceImpl(1024, 16, 1);
 
         List<Integer> result = new ArrayList<>();
         Supplier<Integer> nextIdFunc = new MonotonicIncSupplier(1);
@@ -52,7 +52,7 @@ public class ConsumerTest {
 
     @Test
     public void reverseOrder() throws InterruptedException {
-        ConsumerService service = new ConsumerServiceImpl(1024, 16);
+        ConsumerService service = new ConsumerServiceImpl(1024, 16, 1);
 
         List<Integer> result = new ArrayList<>();
         Supplier<Integer> nextIdFunc = new MonotonicIncSupplier(1);
@@ -70,26 +70,52 @@ public class ConsumerTest {
         assertEquals(result, asList(10, 9, 8, 7, 6, 5, 4, 3, 2, 1));
     }
 
-    /**
-     * This test just for playing with drift
-     */
-    @Test(invocationCount = 1)
-    public void delayed() throws InterruptedException {
-        ConsumerService service = new ConsumerServiceImpl(60000, 1);
-
-        // executor is overloaded
-        /*for (int i = 0; i < 8; i++) {
-            service.addEvent(stub);
-        }*/
+    @Test
+    public void orderInPast() throws InterruptedException {
+        ConsumerService service = new ConsumerServiceImpl(1024, 10, 1);
 
         List<Integer> result = new ArrayList<>();
         Supplier<Integer> nextIdFunc = new MonotonicIncSupplier(1);
-        Supplier<Integer> nextDelayFunc = new MonotonicDecSupplier(15000, 10);
+        Supplier<Integer> nextDelayFunc = new MonotonicDecSupplier(-5000, 1);
 
-        CountDownLatch latch = new CountDownLatch(1000);
+        // executor is overloaded
+        for (int i = 0; i < 4; i++) {
+            service.addEvent(pastStub);
+        }
 
-        for (int i = 0; i < 1000; i++) {
-            helperExecutor.submit(() -> service.addEvent(getEvent(latch, result, nextIdFunc, nextDelayFunc)));
+        int max = 10;
+        CountDownLatch latch = new CountDownLatch(max);
+
+        for (int i = 0; i < max; i++) {
+            service.addEvent(getEvent(latch, result, nextIdFunc, nextDelayFunc));
+        }
+
+        latch.await();
+
+        assertEquals(result, asList(10, 9, 8, 7, 6, 5, 4, 3, 2, 1));
+    }
+
+    /**
+     * This test just for playing with drift
+     */
+    //@Test
+    public void delayed() throws InterruptedException {
+        ConsumerService service = new ConsumerServiceImpl(60000, 4, 1);
+
+        // executor is overloaded
+        for (int i = 0; i < 8; i++) {
+            service.addEvent(stub);
+        }
+
+        List<Integer> result = new ArrayList<>();
+        Supplier<Integer> nextIdFunc = new MonotonicIncSupplier(1);
+        Supplier<Integer> nextDelayFunc = new MonotonicDecSupplier(-100, 100);
+
+        CountDownLatch latch = new CountDownLatch(10);
+
+        for (int i = 0; i < 10; i++) {
+            //helperExecutor.submit(() -> service.addEvent(getEvent(latch, result, nextIdFunc, nextDelayFunc)));
+            service.addEvent(getEvent(latch, result, nextIdFunc, nextDelayFunc));
         }
 
         latch.await();
@@ -100,6 +126,11 @@ public class ConsumerTest {
     }
 
     private static Event<Integer> stub = new Event<>(now(UTC), () -> {
+        Thread.sleep(2000);
+        return 42;
+    });
+
+    private static Event<Integer> pastStub = new Event<>(now(UTC).minusDays(42), () -> {
         Thread.sleep(2000);
         return 42;
     });
